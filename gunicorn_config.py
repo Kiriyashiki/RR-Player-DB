@@ -7,6 +7,9 @@ threads = int(os.environ.get('GUNICORN_THREADS', '4'))
 bind = os.environ.get('GUNICORN_BIND',
                       '{0}:{1}'.format(os.getenv('FLASK_HOST', '127.0.0.1'), os.getenv('FLASK_PORT', '8338')))
 
+accesslog = '-'  # stdout
+errorlog = '-'   # stderr
+capture_output = True
 
 forwarded_allow_ips = '*'
 
