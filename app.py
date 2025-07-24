@@ -27,7 +27,6 @@ grace = int(datetime.now(timezone.utc).timestamp() * 1000)
 scheduler = APScheduler()
 scheduler.init_app(app)
 
-
 def init_sqlite_db(db_path: str) -> None:
     if path.isfile(db_path):
         return
@@ -222,6 +221,29 @@ def fetch_and_insert_from_api():
 
     finally:
         conn.close()
+           
+# MAIN
+
+conn = sqlite3.connect(DB_PATH)
+try:
+    cur = conn.cursor()
+    cur.execute("SELECT last_refresh FROM metadata LIMIT 1")
+    row = cur.fetchone()
+    last_refresh = row[0] if row else 0
+    if grace < last_refresh + 30 * 60 * 1000:  # if db died for < 30min, ignore
+        grace = 0
+        app.logger.info("No grace applied")
+    else:
+        grace = last_refresh + 48 * 60 * 60 * 1000  # 2 days period where no bans if db died
+        app.logger.info("Grace for 2 days after last refresh")
+
+except Exception as e:
+    app.logger.error(f"Could not get last refresh: {e}")
+finally:
+    conn.close()
+        
+scheduler.add_job(func=fetch_and_insert_from_api, trigger='interval', minutes=1, id='fetch_interval')
+scheduler.start()
 
 
 # ----- JSON endpoints -----
@@ -517,24 +539,4 @@ def update_player():
 
 
 if __name__ == '__main__':
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT last_refresh FROM metadata LIMIT 1")
-        row = cur.fetchone()
-        last_refresh = row[0] if row else 0
-        if grace < last_refresh + 30 * 60 * 1000:  # if db died for < 30min, ignore
-            grace = 0
-            print("No grace applied")
-        else:
-            grace = last_refresh + 48 * 60 * 60 * 1000  # 2 days period where no bans if db died
-            print("Grace for 2 days after last refresh")
-
-    except Exception as e:
-        app.logger.error(f"Could not get last refresh: {e}")
-    finally:
-        conn.close()
-
-    scheduler.add_job(func=fetch_and_insert_from_api, trigger='interval', minutes=1, id='fetch_interval')
-    scheduler.start()
     app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False)
