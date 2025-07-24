@@ -156,7 +156,7 @@ def fetch_and_insert_from_api():
                 else:
                     # existing: only check delta if not stale
                     if not stale and VR_BAN_CHECK == 1:
-                        if abs(ev - prev['ev']) > 1000:
+                        if ev - prev['ev'] >= 1000:
                             banned_flag = 1
                     # else: skip delta check for staleness
 
