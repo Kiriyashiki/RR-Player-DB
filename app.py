@@ -83,10 +83,8 @@ def fetch_and_insert_from_api():
 
     init_sqlite_db(DB_PATH)
     conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
     try:
-        conn.execute('BEGIN')
-        cur = conn.cursor()
-
         pids = [p.get('pid') for p in players.values()]
         if pids:
             placeholder = ','.join('?' for _ in pids)
@@ -102,9 +100,13 @@ def fetch_and_insert_from_api():
             }
         else:
             existing = {}
-
+    except Exception as e:
+        app.logger.error(f"Failed to obtain player data for insert: {e}")
+        
+    try:
         raw_map = {}
         to_fetch = []
+
         for p in players.values():
             pid = p.get('pid')
             mii_list = p.get('mii') or []
@@ -133,10 +135,13 @@ def fetch_and_insert_from_api():
             except Exception as ex:
                 app.logger.error(f"Mii API failed: {ex}")
 
+        conn.execute('BEGIN')
+
         for p in players.values():
             pid = p.get('pid')
             ev = int(p.get('ev', 0))
             if ev == 0:
+                app.logger.warning('bad ev' + ev + ' for ' + pid)
                 continue  # skip invalid
 
             prev = existing.get(pid)
