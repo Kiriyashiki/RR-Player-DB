@@ -22,7 +22,7 @@ MII_API_URL = getenv('MII_API_URL', 'https://umapyoi.net/api/v1/mii')
 NEW_PLAYER_BAN_CHECK = int(getenv('NEW_PLAYER_BAN_CHECK', "0"))
 VR_BAN_CHECK = int(getenv('VR_BAN_CHECK', "0"))
 VALID_RK = {'vs_10', 'vs_11', 'vs_12', 'vs_20', 'vs_21', 'vs_22'}
-grace = int(datetime.now(timezone.utc).timestamp() * 1000)
+grace = int(datetime.now(timezone.utc).timestamp())
 
 scheduler = APScheduler()
 scheduler.init_app(app)
@@ -149,10 +149,10 @@ def fetch_and_insert_from_api():
             rizz_flag = prev['rizz'] if prev else 0
             lastupdated = prev['lastupdated'] if prev else 0
 
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            stale = (now_ms - lastupdated) > 48 * 60 * 60 * 1000
+            now_s = int(datetime.now(timezone.utc).timestamp())
+            stale = (now_s - lastupdated) > 48 * 60 * 60
 
-            if banned_flag == 0 and now_ms > grace:  # avoid bans if the db died
+            if banned_flag == 0 and now_s > grace:  # avoid bans if the db died
                 # new player?
                 if not prev and NEW_PLAYER_BAN_CHECK == 1:
                     # first-seen: ban if VR>=15000
@@ -182,7 +182,7 @@ def fetch_and_insert_from_api():
                 proc_to_store,
                 (p.get('mii') or [{}])[0].get('name'),
                 int(p.get('suspend', 0)),
-                now_ms,
+                now_s,
                 1 if p.get('openhost') == 'true' else 0,
                 banned_flag,
                 rizz_flag
@@ -206,7 +206,7 @@ def fetch_and_insert_from_api():
                 values
             )
 
-            bucket = round_down_to_interval(now_ms)
+            bucket = round_down_to_interval(now_s)
             cur.execute(
                 '''INSERT INTO VRHistory(timestamp, pid, vr)
                    VALUES (?, ?, ?) ON CONFLICT(timestamp,pid) DO
@@ -214,10 +214,10 @@ def fetch_and_insert_from_api():
                 (bucket, pid, ev)
             )
 
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now_s = int(datetime.now(timezone.utc).timestamp())
 
         cur.execute('DELETE FROM metadata')
-        cur.execute('INSERT INTO metadata(last_refresh) VALUES(?)', (now_ms,))
+        cur.execute('INSERT INTO metadata(last_refresh) VALUES(?)', (now_s,))
         conn.commit()
 
     except Exception as e:
@@ -235,11 +235,11 @@ try:
     cur.execute("SELECT last_refresh FROM metadata LIMIT 1")
     row = cur.fetchone()
     last_refresh = row[0] if row else 0
-    if grace < last_refresh + 30 * 60 * 1000:  # if db died for < 30min, ignore
+    if grace < last_refresh + 30 * 60:  # if db died for < 30min, ignore
         grace = 0
         app.logger.info("No grace applied")
     else:
-        grace = last_refresh + 48 * 60 * 60 * 1000  # 2 days period where no bans if db died
+        grace = last_refresh + 48 * 60 * 60  # 2 days period where no bans if db died
         app.logger.info("Grace for 2 days after last refresh")
 
 except Exception as e:
@@ -357,10 +357,10 @@ def get_leaderboard():
     # build a list of the current-page PIDs
     pids = [p['pid'] for p in players]
     if pids:
-        # cutoff = now - 7 days in ms
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        seven_days_ms = 7 * 24 * 60 * 60 * 1000
-        cutoff = now_ms - seven_days_ms
+        # cutoff = now - 7 days in s
+        now_s = int(datetime.now(timezone.utc).timestamp())
+        seven_days_s = 7 * 24 * 60 * 60
+        cutoff = now_s - seven_days_s
 
         # use a sub‑query to get each pid’s earliest timestamp ≥ cutoff
         placeholder = ','.join('?' for _ in pids)
@@ -438,13 +438,13 @@ def insert_data_from_json(json_path: str, db_path: str) -> None:
         conn.execute('BEGIN')
         if 'last_refresh' in data:
             cur.execute('DELETE FROM metadata')
-            cur.execute('INSERT INTO metadata (last_refresh) VALUES (?)', (int(data['last_refresh']),))
+            cur.execute('INSERT INTO metadata (last_refresh) VALUES (?)', (int(data['last_refresh']) // 1000,))
         for key, p in data.items():
             if key == 'last_refresh':
                 continue
             pid = p.get('pid')
             ev = int(p.get('ev', 0))
-            lastupd = int(p.get('lastupdated', 0))
+            lastupd = int(p.get('lastupdated', 0)) // 1000
             raw = ''
             mii_data = (p.get('mii') or [{}])[0].get('data')
             mii_name = (p.get('mii') or [{}])[0].get('name')
