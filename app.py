@@ -21,6 +21,7 @@ API_URL = getenv('API_URL', 'http://rwfc.net/api/groups')
 MII_API_URL = getenv('MII_API_URL', 'https://umapyoi.net/api/v1/mii')
 NEW_PLAYER_BAN_CHECK = int(getenv('NEW_PLAYER_BAN_CHECK', "0"))
 VR_BAN_CHECK = int(getenv('VR_BAN_CHECK', "0"))
+WRITE_LOCK = int(getenv('WRITE_LOCK', "0"))
 VALID_RK = {'vs_10', 'vs_11', 'vs_12', 'vs_20', 'vs_21', 'vs_22'}
 grace = int(datetime.now(timezone.utc).timestamp())
 
@@ -256,9 +257,11 @@ except Exception as e:
     app.logger.error(f"Could not get last refresh: {e}")
 finally:
     conn.close()
-        
-scheduler.add_job(func=fetch_and_insert_from_api, trigger='interval', minutes=1, id='fetch_interval')
-scheduler.start()
+
+
+if WRITE_LOCK == 0: # prevent updates if we lock the db
+    scheduler.add_job(func=fetch_and_insert_from_api, trigger='interval', minutes=1, id='fetch_interval')
+    scheduler.start()
 
 
 # ----- JSON endpoints -----
