@@ -51,7 +51,9 @@ def init_sqlite_db(db_path: str) -> None:
                     lastupdated  INTEGER,
                     openhost     BOOLEAN,
                     banned       BOOLEAN,
-                    rizz         BOOLEAN
+                    rizz         BOOLEAN,
+                    peak         INTEGER,
+                    peak_time    INTEGER
                 )
                 ''')
     cur.execute('''
@@ -89,14 +91,14 @@ def fetch_and_insert_from_api():
         if pids:
             placeholder = ','.join('?' for _ in pids)
             cur.execute(f"""
-                SELECT pid, raw_mii_data, mii_data, ev, banned, rizz, lastupdated
+                SELECT pid, raw_mii_data, mii_data, ev, banned, rizz, lastupdated, peak, peak_time
                 FROM players 
                 WHERE pid IN ({placeholder})
             """, pids)
             existing = {
                 pid: {'raw': raw, 'proc': proc, 'ev': ev0, 'banned': banned0, 'rizz': rizz0,
-                      'lastupdated': lastupdated0}
-                for pid, raw, proc, ev0, banned0, rizz0, lastupdated0 in cur.fetchall()
+                      'lastupdated': lastupdated0, 'peak': peak0, 'peak_time': peak_time0}
+                for pid, raw, proc, ev0, banned0, rizz0, lastupdated0, peak0, peak_time0 in cur.fetchall()
             }
         else:
             existing = {}
@@ -148,6 +150,8 @@ def fetch_and_insert_from_api():
             banned_flag = prev['banned'] if prev else 0
             rizz_flag = prev['rizz'] if prev else 0
             lastupdated = prev['lastupdated'] if prev else 0
+            peak = prev['peak'] if prev else 0
+            peak_time = prev['peak_time'] if prev else 0
 
             now_s = int(datetime.now(timezone.utc).timestamp())
             stale = (now_s - lastupdated) > 48 * 60 * 60
@@ -164,6 +168,10 @@ def fetch_and_insert_from_api():
                         if ev - prev['ev'] >= 1000:
                             banned_flag = 1
                     # else: skip delta check for staleness
+
+            if ev > peak:
+                peak = ev
+                peak_time = now_s
 
             incoming_raw = raw_map.get(pid, None)
             # if the room API gave us null or no entry, fall back to existing raw
@@ -185,13 +193,15 @@ def fetch_and_insert_from_api():
                 now_s,
                 1 if p.get('openhost') == 'true' else 0,
                 banned_flag,
-                rizz_flag
+                rizz_flag,
+                peak,
+                peak_time
             )
             cur.execute(
                 '''INSERT INTO players
                    (pid, fc, eb, ev, name, raw_mii_data, mii_data, mii_name,
-                    suspend, lastupdated, openhost, banned, rizz)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(pid) DO
+                    suspend, lastupdated, openhost, banned, rizz, peak, peak_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(pid) DO
                 UPDATE SET
                     fc=excluded.fc, eb=excluded.eb, ev=excluded.ev,
                     name =excluded.name, raw_mii_data=excluded.raw_mii_data,
@@ -201,7 +211,7 @@ def fetch_and_insert_from_api():
                     banned= CASE WHEN players.banned=1 THEN 1 ELSE excluded.banned
                 END,
                     rizz= CASE WHEN players.rizz=1 THEN 1 ELSE excluded.rizz
-                END
+                END, peak=excluded.peak, peak_time=excluded.peak_time
                 ''',
                 values
             )
@@ -335,7 +345,7 @@ def get_leaderboard():
     # 1) Compute global positions in a CTE
     base_sql = """
                WITH ranked AS (SELECT *,
-                                      ROW_NUMBER() OVER (ORDER BY banned ASC, ev DESC, lastupdated DESC) AS position
+                                      ROW_NUMBER() OVER (ORDER BY banned ASC, ev DESC, peak_time ASC, lastupdated DESC) AS position
                FROM players
                    )
                SELECT *
@@ -346,7 +356,7 @@ def get_leaderboard():
         base_sql += "WHERE name LIKE ? OR fc LIKE ?\n"
         params += [like_q, like_q]
 
-    base_sql += "ORDER BY banned ASC, ev DESC, lastupdated DESC\nLIMIT ? OFFSET ?"
+    base_sql += "ORDER BY banned ASC, ev DESC, peak_time ASC, lastupdated DESC\nLIMIT ? OFFSET ?"
     params += [limit, offset]
 
     cur.execute(base_sql, params)
@@ -450,11 +460,11 @@ def insert_data_from_json(json_path: str, db_path: str) -> None:
             mii_name = (p.get('mii') or [{}])[0].get('name')
             cur.execute(
                 '''INSERT INTO players(pid, fc, eb, ev, name, raw_mii_data, mii_data, mii_name, suspend, lastupdated,
-                                       openhost, banned, rizz)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(pid) DO
+                                       openhost, banned, rizz, peak, peak_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT(pid) DO
                 UPDATE
                     SET
-                        fc=excluded.fc, eb=excluded.eb, ev=excluded.ev, name =excluded.name, raw_mii_data=players.raw_mii_data, mii_data=excluded.mii_data, mii_name=excluded.mii_name, suspend=excluded.suspend, lastupdated=excluded.lastupdated, openhost=excluded.openhost, banned=players.banned''',
+                        fc=excluded.fc, eb=excluded.eb, ev=excluded.ev, name =excluded.name, raw_mii_data=players.raw_mii_data, mii_data=excluded.mii_data, mii_name=excluded.mii_name, suspend=excluded.suspend, lastupdated=excluded.lastupdated, openhost=excluded.openhost, banned=players.banned, peak=excluded.peak, peak_time=excluded.peak_time''',
                 (
                     pid,
                     p.get('fc'),
@@ -467,7 +477,9 @@ def insert_data_from_json(json_path: str, db_path: str) -> None:
                     int(p.get('suspend', 0)),
                     lastupd,
                     1 if p.get('openhost') == 'true' else 0,
-                    1 if p.get('banned', False) else 0
+                    1 if p.get('banned', False) else 0,
+                    ev,
+                    lastupd
                 )
             )
             bucket = round_down_to_interval(lastupd)
