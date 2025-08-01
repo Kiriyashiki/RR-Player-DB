@@ -144,7 +144,7 @@ def fetch_and_insert_from_api():
             pid = p.get('pid')
             ev = int(p.get('ev', 0))
             if ev == 0:
-                app.logger.warning('bad ev' + ev + ' for ' + pid)
+                app.logger.warning(f"bad ev {ev} for {pid}")
                 continue  # skip invalid
 
             prev = existing.get(pid)
@@ -248,10 +248,10 @@ try:
     last_refresh = row[0] if row else 0
     if grace < last_refresh + 30 * 60:  # if db died for < 30min, ignore
         grace = 0
-        app.logger.info("No grace applied")
+        app.logger.warning("No grace applied")
     else:
         grace = last_refresh + 48 * 60 * 60  # 2 days period where no bans if db died
-        app.logger.info("Grace for 2 days after last refresh")
+        app.logger.warning("Grace for 2 days after last refresh")
 
 except Exception as e:
     app.logger.error(f"Could not get last refresh: {e}")
